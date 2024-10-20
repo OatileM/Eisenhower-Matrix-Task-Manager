@@ -34,6 +34,7 @@ if db_available:
     folders_collection = db['folders']
     timers_collection = db['timers']
 
+#  Decorator that's designed to handle database-related errors in application
 def handle_db_error(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
