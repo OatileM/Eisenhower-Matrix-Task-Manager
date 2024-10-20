@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, current_app
 from datetime import datetime, timedelta
 import os
 from pymongo import MongoClient
@@ -96,21 +96,33 @@ def get_folder_tasks(folder_id):
 @app.route('/timer/start', methods=['POST'])
 @handle_db_error
 def start_timer():
-    data = request.json
-    task_id = data['task_id']
-    task = tasks_collection.find_one({'_id': ObjectId(task_id)})
-    if not task:
-        return jsonify({'error': 'Task not found'}), 404
-    
-    timer = {
-        'task_id': task_id,
-        'start_time': datetime.now(),
-        'paused_time': None,
-        'total_pause_time': timedelta(0)
-    }
-    result = timers_collection.insert_one(timer)
-    timer['_id'] = str(result.inserted_id)
-    return jsonify(timer), 201
+    current_app.logger.info("start_timer function called")
+    try:
+        data = request.json
+        current_app.logger.info(f"Received data: {data}")
+        task_id = data['task_id']
+        current_app.logger.info(f"Searching for task with id: {task_id}")
+        task = tasks_collection.find_one({'_id': ObjectId(task_id)})
+        if not task:
+            current_app.logger.warning(f"Task not found: {task_id}")
+            return jsonify({'error': 'Task not found'}), 404
+        
+        current_app.logger.info(f"Task found: {task}")
+        timer = {
+            'task_id': task_id,
+            'start_time': datetime.now(),
+            'paused_time': None,
+            'total_pause_time': 0  # Store as seconds instead of timedelta
+        }
+        current_app.logger.info(f"Inserting timer: {timer}")
+        result = timers_collection.insert_one(timer)
+        timer['_id'] = str(result.inserted_id)
+        timer['start_time'] = timer['start_time'].isoformat()  # Convert datetime to string
+        current_app.logger.info(f"Timer inserted successfully: {timer}")
+        return jsonify(timer), 201
+    except Exception as e:
+        current_app.logger.error(f"Error in start_timer: {str(e)}")
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 
 @app.route('/timer/pause', methods=['POST'])
 @handle_db_error
@@ -121,54 +133,104 @@ def pause_timer():
     if not timer:
         return jsonify({'error': 'Active timer not found'}), 404
     
+    pause_time = datetime.now()
     timers_collection.update_one(
         {'_id': timer['_id']},
-        {'$set': {'paused_time': datetime.now()}}
+        {'$set': {'paused_time': pause_time}}
     )
-    timer['paused_time'] = datetime.now()
+    timer['paused_time'] = pause_time.isoformat()
     timer['_id'] = str(timer['_id'])
     return jsonify(timer)
 
 @app.route('/timer/resume', methods=['POST'])
 @handle_db_error
 def resume_timer():
-    data = request.json
-    task_id = data['task_id']
-    timer = timers_collection.find_one({'task_id': task_id, 'paused_time': {'$ne': None}})
-    if not timer:
-        return jsonify({'error': 'Paused timer not found'}), 404
-    
-    pause_duration = datetime.now() - timer['paused_time']
-    timers_collection.update_one(
-        {'_id': timer['_id']},
-        {
-            '$set': {'paused_time': None},
-            '$inc': {'total_pause_time': pause_duration.total_seconds()}
-        }
-    )
-    timer['paused_time'] = None
-    timer['total_pause_time'] += pause_duration
-    timer['_id'] = str(timer['_id'])
-    return jsonify(timer)
+    current_app.logger.info("resume_timer function called")
+    try:
+        data = request.json
+        current_app.logger.info(f"Received data: {data}")
+        task_id = data['task_id']
+        current_app.logger.info(f"Searching for paused timer with task_id: {task_id}")
+        timer = timers_collection.find_one({'task_id': task_id, 'paused_time': {'$ne': None}})
+        if not timer:
+            current_app.logger.warning(f"Paused timer not found for task_id: {task_id}")
+            return jsonify({'error': 'Paused timer not found'}), 404
+        
+        current_app.logger.info(f"Paused timer found: {timer}")
+        current_time = datetime.now()
+        current_app.logger.info(f"Current time: {current_time}")
+        current_app.logger.info(f"Paused time from DB: {timer['paused_time']}")
+        
+        # Check if paused_time is already a datetime object
+        if isinstance(timer['paused_time'], datetime):
+            paused_time = timer['paused_time']
+        else:
+            # If it's a string, parse it
+            paused_time = datetime.fromisoformat(timer['paused_time'])
+        
+        current_app.logger.info(f"Parsed paused time: {paused_time}")
+        pause_duration = (current_time - paused_time).total_seconds()
+        
+        current_app.logger.info(f"Calculating pause duration: {pause_duration} seconds")
+        
+        update_result = timers_collection.update_one(
+            {'_id': timer['_id']},
+            {
+                '$set': {'paused_time': None},
+                '$inc': {'total_pause_time': pause_duration}
+            }
+        )
+        current_app.logger.info(f"Update result: {update_result.modified_count} document(s) modified")
+        
+        timer['paused_time'] = None
+        timer['total_pause_time'] += pause_duration
+        timer['_id'] = str(timer['_id'])
+        current_app.logger.info(f"Timer resumed: {timer}")
+        return jsonify(timer)
+    except Exception as e:
+        current_app.logger.error(f"Error in resume_timer: {str(e)}")
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 
 @app.route('/timer/stop', methods=['POST'])
 @handle_db_error
 def stop_timer():
-    data = request.json
-    task_id = data['task_id']
-    timer = timers_collection.find_one({'task_id': task_id})
-    if not timer:
-        return jsonify({'error': 'Timer not found'}), 404
-    
-    end_time = datetime.now()
-    total_time = end_time - timer['start_time'] - timedelta(seconds=timer['total_pause_time'])
-    
-    result = {
-        'task_id': task_id,
-        'total_time': str(total_time)
-    }
-    timers_collection.delete_one({'_id': timer['_id']})
-    return jsonify(result)
+    current_app.logger.info("stop_timer function called")
+    try:
+        data = request.json
+        current_app.logger.info(f"Received data: {data}")
+        task_id = data['task_id']
+        current_app.logger.info(f"Searching for timer with task_id: {task_id}")
+        timer = timers_collection.find_one({'task_id': task_id})
+        if not timer:
+            current_app.logger.warning(f"Timer not found for task_id: {task_id}")
+            return jsonify({'error': 'Timer not found'}), 404
+        
+        current_app.logger.info(f"Timer found: {timer}")
+        end_time = datetime.now()
+        current_app.logger.info(f"End time: {end_time}")
+
+        # Convert start_time to datetime if it's a string
+        start_time = timer['start_time']
+        if isinstance(start_time, str):
+            start_time = datetime.fromisoformat(start_time.rstrip('Z'))
+        
+        current_app.logger.info(f"Start time: {start_time}")
+
+        total_time = end_time - start_time - timedelta(seconds=timer['total_pause_time'])
+        current_app.logger.info(f"Calculated total time: {total_time}")
+        
+        result = {
+            'task_id': task_id,
+            'total_time': str(total_time)
+        }
+        delete_result = timers_collection.delete_one({'_id': timer['_id']})
+        current_app.logger.info(f"Delete result: {delete_result.deleted_count} document(s) deleted")
+        
+        current_app.logger.info(f"Timer stopped: {result}")
+        return jsonify(result)
+    except Exception as e:
+        current_app.logger.error(f"Error in stop_timer: {str(e)}")
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
