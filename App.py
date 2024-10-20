@@ -62,6 +62,7 @@ def create_task():
     }
     result = tasks_collection.insert_one(task)
     task['_id'] = str(result.inserted_id)
+    task['created_at'] = task['created_at'].isoformat()
     return jsonify(task), 201
 
 @app.route('/task/<task_id>', methods=['GET'])
@@ -70,8 +71,29 @@ def get_task(task_id):
     task = tasks_collection.find_one({'_id': ObjectId(task_id)})
     if task:
         task['_id'] = str(task['_id'])
+        task['created_at'] = task['created_at'].isoformat()
         return jsonify(task)
     return jsonify({'error': 'Task not found'}), 404
+
+@app.route('/task/<task_id>', methods=['DELETE'])
+@handle_db_error
+def delete_task(task_id):
+    current_app.logger.info(f"delete_task function called for task_id: {task_id}")
+    try:
+        result = tasks_collection.delete_one({'_id': ObjectId(task_id)})
+        if result.deleted_count == 0:
+            current_app.logger.warning(f"Task not found: {task_id}")
+            return jsonify({'error': 'Task not found'}), 404
+        
+        # Also delete any associated timers
+        timers_collection.delete_many({'task_id': task_id})
+        
+        current_app.logger.info(f"Task {task_id} deleted successfully")
+        return jsonify({'message': 'Task deleted successfully'}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error in delete_task: {str(e)}")
+  
+
 
 @app.route('/folder', methods=['POST'])
 @handle_db_error
@@ -83,7 +105,28 @@ def create_folder():
     }
     result = folders_collection.insert_one(folder)
     folder['_id'] = str(result.inserted_id)
+    folder['created_at'] = folder['created_at'].isoformat()
     return jsonify(folder), 201
+
+@app.route('/folder/<folder_id>', methods=['DELETE'])
+@handle_db_error
+def delete_folder(folder_id):
+    current_app.logger.info(f"delete_folder function called for folder_id: {folder_id}")
+    try:
+        # First, delete all tasks in the folder
+        current_app.logger.info(f"Deleted {tasks_collection.deleted_count} tasks from folder {folder_id}")
+        
+        # Then delete the folder
+        folder_result = folders_collection.delete_one({'_id': ObjectId(folder_id)})
+        if folder_result.deleted_count == 0:
+            current_app.logger.warning(f"Folder not found: {folder_id}")
+            return jsonify({'error': 'Folder not found'}), 404
+        
+        current_app.logger.info(f"Folder {folder_id} deleted successfully")
+        return jsonify({'message': 'Folder and all its tasks deleted successfully'}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error in delete_folder: {str(e)}")
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 
 @app.route('/folder/<folder_id>/tasks', methods=['GET'])
 @handle_db_error
@@ -91,7 +134,76 @@ def get_folder_tasks(folder_id):
     folder_tasks = list(tasks_collection.find({'folder_id': folder_id}))
     for task in folder_tasks:
         task['_id'] = str(task['_id'])
+        task['created_at'] = task['created_at'].isoformat()
     return jsonify(folder_tasks)
+
+@app.route('/folder/<folder_id>/task', methods=['POST'])
+@handle_db_error
+def add_task_to_folder(folder_id):
+    current_app.logger.info(f"add_task_to_folder function called for folder_id: {folder_id}")
+    try:
+        data = request.json
+        current_app.logger.info(f"Received data: {data}")
+        
+        # Check if the folder exists
+        folder = folders_collection.find_one({'_id': ObjectId(folder_id)})
+        if not folder:
+            current_app.logger.warning(f"Folder not found: {folder_id}")
+            return jsonify({'error': 'Folder not found'}), 404
+        
+        task = {
+            'name': data['name'],
+            'folder_id': folder_id,
+            'created_at': datetime.now()
+        }
+        result = tasks_collection.insert_one(task)
+        task['_id'] = str(result.inserted_id)
+        task['created_at'] = task['created_at'].isoformat()
+        
+        current_app.logger.info(f"Task added to folder: {task}")
+        return jsonify(task), 201
+    except Exception as e:
+        current_app.logger.error(f"Error in add_task_to_folder: {str(e)}")
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
+
+@app.route('/task/<task_id>/move', methods=['PUT'])
+@handle_db_error
+def move_task_to_folder(task_id):
+    current_app.logger.info(f"move_task_to_folder function called for task_id: {task_id}")
+    try:
+        data = request.json
+        folder_id = data.get('folder_id')
+        current_app.logger.info(f"Received data: {data}")
+
+        # Check if the task exists
+        task = tasks_collection.find_one({'_id': ObjectId(task_id)})
+        if not task:
+            current_app.logger.warning(f"Task not found: {task_id}")
+            return jsonify({'error': 'Task not found'}), 404
+
+        # If folder_id is provided, check if the folder exists
+        if folder_id:
+            folder = folders_collection.find_one({'_id': ObjectId(folder_id)})
+            if not folder:
+                current_app.logger.warning(f"Folder not found: {folder_id}")
+                return jsonify({'error': 'Folder not found'}), 404
+
+        # Update the task's folder_id
+        update_result = tasks_collection.update_one(
+            {'_id': ObjectId(task_id)},
+            {'$set': {'folder_id': folder_id}}
+        )
+
+        if update_result.modified_count == 0:
+            current_app.logger.warning(f"Task {task_id} was not modified")
+            return jsonify({'message': 'Task was not modified'}), 200
+
+        current_app.logger.info(f"Task {task_id} moved to folder {folder_id}")
+        return jsonify({'message': 'Task moved successfully'}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error in move_task_to_folder: {str(e)}")
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
+
 
 @app.route('/timer/start', methods=['POST'])
 @handle_db_error
@@ -108,16 +220,17 @@ def start_timer():
             return jsonify({'error': 'Task not found'}), 404
         
         current_app.logger.info(f"Task found: {task}")
+        start_time = datetime.now()
         timer = {
             'task_id': task_id,
-            'start_time': datetime.now(),
+            'start_time': start_time,
             'paused_time': None,
-            'total_pause_time': 0  # Store as seconds instead of timedelta
+            'total_pause_time': 0
         }
         current_app.logger.info(f"Inserting timer: {timer}")
         result = timers_collection.insert_one(timer)
         timer['_id'] = str(result.inserted_id)
-        timer['start_time'] = timer['start_time'].isoformat()  # Convert datetime to string
+        timer['start_time'] = start_time.isoformat()
         current_app.logger.info(f"Timer inserted successfully: {timer}")
         return jsonify(timer), 201
     except Exception as e:
@@ -127,20 +240,32 @@ def start_timer():
 @app.route('/timer/pause', methods=['POST'])
 @handle_db_error
 def pause_timer():
-    data = request.json
-    task_id = data['task_id']
-    timer = timers_collection.find_one({'task_id': task_id, 'paused_time': None})
-    if not timer:
-        return jsonify({'error': 'Active timer not found'}), 404
-    
-    pause_time = datetime.now()
-    timers_collection.update_one(
-        {'_id': timer['_id']},
-        {'$set': {'paused_time': pause_time}}
-    )
-    timer['paused_time'] = pause_time.isoformat()
-    timer['_id'] = str(timer['_id'])
-    return jsonify(timer)
+    current_app.logger.info("pause_timer function called")
+    try:
+        data = request.json
+        current_app.logger.info(f"Received data: {data}")
+        task_id = data['task_id']
+        current_app.logger.info(f"Searching for active timer with task_id: {task_id}")
+        timer = timers_collection.find_one({'task_id': task_id, 'paused_time': None})
+        if not timer:
+            current_app.logger.warning(f"Active timer not found for task_id: {task_id}")
+            return jsonify({'error': 'Active timer not found'}), 404
+        
+        current_app.logger.info(f"Active timer found: {timer}")
+        pause_time = datetime.now()
+        update_result = timers_collection.update_one(
+            {'_id': timer['_id']},
+            {'$set': {'paused_time': pause_time}}
+        )
+        current_app.logger.info(f"Update result: {update_result.modified_count} document(s) modified")
+        
+        timer['paused_time'] = pause_time.isoformat()
+        timer['_id'] = str(timer['_id'])
+        current_app.logger.info(f"Timer paused: {timer}")
+        return jsonify(timer)
+    except Exception as e:
+        current_app.logger.error(f"Error in pause_timer: {str(e)}")
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 
 @app.route('/timer/resume', methods=['POST'])
 @handle_db_error
