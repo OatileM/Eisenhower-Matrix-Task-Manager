@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, current_app
+from flask import Flask, request, jsonify, current_app, render_template
 from datetime import datetime, timedelta
 import os
 from pymongo import MongoClient
@@ -6,8 +6,12 @@ from pymongo.errors import ConnectionFailure, OperationFailure
 from bson.objectid import ObjectId
 from bson.errors import InvalidId
 from functools import wraps
+from flask_cors import CORS
 
 app = Flask(__name__)
+
+# Enable CORS
+cors = CORS(app)    
 
 # MongoDB Atlas connection string
 mongo_uri = os.environ.get('MONGO_URI')
@@ -52,19 +56,48 @@ def handle_db_error(func):
             return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
     return wrapper
 
+def get_eisenhower_quadrant(priority):
+    if priority['urgent'] and priority['important']:
+        return "urgent_important"
+    elif not priority['urgent'] and priority['important']:
+        return "not_urgent_important"
+    elif priority['urgent'] and not priority['important']:
+        return "urgent_not_important"
+    else:
+        return "not_urgent_not_important"
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
 @app.route('/task', methods=['POST'])
 @handle_db_error
 def create_task():
     data = request.json
+    priority = data['priority']
+    quadrant = get_eisenhower_quadrant(priority)
+    
+    # Check if the quadrant folder exists, if not create it
+    folder = folders_collection.find_one({'name': quadrant})
+    if not folder:
+        folder_result = folders_collection.insert_one({'name': quadrant, 'created_at': datetime.now()})
+        folder_id = str(folder_result.inserted_id)
+    else:
+        folder_id = str(folder['_id'])
+    
     task = {
         'name': data['name'],
-        'folder_id': data.get('folder_id'),
+        'folder_id': folder_id,
+        'priority': priority,
         'created_at': datetime.now()
     }
     result = tasks_collection.insert_one(task)
     task['_id'] = str(result.inserted_id)
     task['created_at'] = task['created_at'].isoformat()
     return jsonify(task), 201
+
 
 @app.route('/task/<task_id>', methods=['GET'])
 @handle_db_error
@@ -75,6 +108,17 @@ def get_task(task_id):
         task['created_at'] = task['created_at'].isoformat()
         return jsonify(task)
     return jsonify({'error': 'Task not found'}), 404
+
+@app.route('/task', methods=['GET'])
+@handle_db_error
+def get_all_tasks():
+    tasks = list(tasks_collection.find())
+    for task in tasks:
+        task['_id'] = str(task['_id'])
+        task['created_at'] = task['created_at'].isoformat()
+    return jsonify(tasks)
+
+
 
 @app.route('/task/<task_id>', methods=['DELETE'])
 @handle_db_error
@@ -173,7 +217,7 @@ def move_task_to_folder(task_id):
     current_app.logger.info(f"move_task_to_folder function called for task_id: {task_id}")
     try:
         data = request.json
-        folder_id = data.get('folder_id')
+        new_priority = data.get('priority')
         current_app.logger.info(f"Received data: {data}")
 
         # Check if the task exists
@@ -182,29 +226,35 @@ def move_task_to_folder(task_id):
             current_app.logger.warning(f"Task not found: {task_id}")
             return jsonify({'error': 'Task not found'}), 404
 
-        # If folder_id is provided, check if the folder exists
-        if folder_id:
-            folder = folders_collection.find_one({'_id': ObjectId(folder_id)})
+        # Determine new quadrant based on priority
+        if new_priority:
+            new_quadrant = get_eisenhower_quadrant(new_priority)
+            folder = folders_collection.find_one({'name': new_quadrant})
             if not folder:
-                current_app.logger.warning(f"Folder not found: {folder_id}")
-                return jsonify({'error': 'Folder not found'}), 404
+                folder_result = folders_collection.insert_one({'name': new_quadrant, 'created_at': datetime.now()})
+                folder_id = str(folder_result.inserted_id)
+            else:
+                folder_id = str(folder['_id'])
+        else:
+            folder_id = data.get('folder_id')
 
-        # Update the task's folder_id
-        update_result = tasks_collection.update_one(
-            {'_id': ObjectId(task_id)},
-            {'$set': {'folder_id': folder_id}}
-        )
+        # Create the update_data dictionary
+        update_data = {"$set": {"folder_id": folder_id}}
+        if new_priority:
+            update_data["$set"]["priority"] = new_priority
+
+        # Perform the update operation
+        update_result = tasks_collection.update_one({'_id': ObjectId(task_id)}, update_data)
 
         if update_result.modified_count == 0:
-            current_app.logger.warning(f"Task {task_id} was not modified")
-            return jsonify({'message': 'Task was not modified'}), 200
+            current_app.logger.warning(f"Task not found or no changes made: {task_id}")
+            return jsonify({'message': 'Task not found or no changes made'}), 404
 
-        current_app.logger.info(f"Task {task_id} moved to folder {folder_id}")
+        current_app.logger.info(f"Task {task_id} moved to folder {folder_id} successfully")
         return jsonify({'message': 'Task moved successfully'}), 200
     except Exception as e:
         current_app.logger.error(f"Error in move_task_to_folder: {str(e)}")
         return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
-
 
 @app.route('/timer/start', methods=['POST'])
 @handle_db_error

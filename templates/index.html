@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eisenhower Matrix Task Manager</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Eisenhower Matrix Task Manager</h1>
+    </header>
+    <main>
+        <section id="task-form">
+            <h2>Add New Task</h2>
+            <form id="new-task-form">
+                <input type="text" id="task-name" placeholder="Enter task name" required>
+                <div class="priority-selector">
+                    <label>
+                        <input type="checkbox" id="urgent">
+                        Urgent
+                    </label>
+                    <label>
+                        <input type="checkbox" id="important">
+                        Important
+                    </label>
+                </div>
+                <button type="submit">Add Task</button>
+            </form>
+        </section>
+        <section id="matrix">
+            <div class="quadrant" id="urgent-important">
+                <h3>Urgent & Important</h3>
+                <ul class="task-list"></ul>
+            </div>
+            <div class="quadrant" id="not-urgent-important">
+                <h3>Not Urgent & Important</h3>
+                <ul class="task-list"></ul>
+            </div>
+            <div class="quadrant" id="urgent-not-important">
+                <h3>Urgent & Not Important</h3>
+                <ul class="task-list"></ul>
+            </div>
+            <div class="quadrant" id="not-urgent-not-important">
+                <h3>Not Urgent & Not Important</h3>
+                <ul class="task-list"></ul>
+            </div>
+        </section>
+    </main>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
