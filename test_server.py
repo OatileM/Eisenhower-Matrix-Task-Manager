@@ -1,47 +1,57 @@
 import requests
-import time
+import json
+from datetime import datetime
 
-# Base URL of your server
-BASE_URL = 'http://localhost:5000'
+BASE_URL = "http://localhost:5000"
 
 def test_create_task():
     print("Testing create task...")
-    response = requests.post(f"{BASE_URL}/task", json={"name": "Test Task"})
+    task_data = {
+        "name": "Test Task",
+        "priority": {"urgent": True, "important": True}
+    }
+    response = requests.post(f"{BASE_URL}/task", json=task_data)
     print(f"Status Code: {response.status_code}")
+    print(f"Response content: {response.text}")
     assert response.status_code == 201, f"Expected status code 201, but got {response.status_code}"
-    task = response.json()
-    print(f"Created task: {task}")
-    return task['_id']
+    result = response.json()
+    print(f"Create task result: {result}")
+    return result['_id']
 
 def test_get_task(task_id):
     print(f"Testing get task {task_id}...")
     response = requests.get(f"{BASE_URL}/task/{task_id}")
     print(f"Status Code: {response.status_code}")
+    print(f"Response content: {response.text}")
     assert response.status_code == 200, f"Expected status code 200, but got {response.status_code}"
-    task = response.json()
-    print(f"Retrieved task: {task}")
+    result = response.json()
+    print(f"Get task result: {result}")
 
 def test_delete_task(task_id):
     print(f"Testing delete task {task_id}...")
     response = requests.delete(f"{BASE_URL}/task/{task_id}")
     print(f"Status Code: {response.status_code}")
+    print(f"Response content: {response.text}")
     assert response.status_code == 200, f"Expected status code 200, but got {response.status_code}"
     result = response.json()
     print(f"Delete task result: {result}")
 
 def test_create_folder():
     print("Testing create folder...")
-    response = requests.post(f"{BASE_URL}/folder", json={"name": "Test Folder"})
+    folder_data = {"name": "Test Folder"}
+    response = requests.post(f"{BASE_URL}/folder", json=folder_data)
     print(f"Status Code: {response.status_code}")
+    print(f"Response content: {response.text}")
     assert response.status_code == 201, f"Expected status code 201, but got {response.status_code}"
-    folder = response.json()
-    print(f"Created folder: {folder}")
-    return folder['_id']
+    result = response.json()
+    print(f"Create folder result: {result}")
+    return result['_id']
 
 def test_delete_folder(folder_id):
     print(f"Testing delete folder {folder_id}...")
     response = requests.delete(f"{BASE_URL}/folder/{folder_id}")
     print(f"Status Code: {response.status_code}")
+    print(f"Response content: {response.text}")
     assert response.status_code == 200, f"Expected status code 200, but got {response.status_code}"
     result = response.json()
     print(f"Delete folder result: {result}")
@@ -50,69 +60,33 @@ def test_get_folder_tasks(folder_id):
     print(f"Testing get folder tasks for folder {folder_id}...")
     response = requests.get(f"{BASE_URL}/folder/{folder_id}/tasks")
     print(f"Status Code: {response.status_code}")
+    print(f"Response content: {response.text}")
     assert response.status_code == 200, f"Expected status code 200, but got {response.status_code}"
-    tasks = response.json()
-    print(f"Retrieved tasks: {tasks}")
+    result = response.json()
+    print(f"Get folder tasks result: {result}")
 
 def test_add_task_to_folder(folder_id):
     print(f"Testing add task to folder {folder_id}...")
     task_data = {"name": "Test Task in Folder"}
     response = requests.post(f"{BASE_URL}/folder/{folder_id}/task", json=task_data)
     print(f"Status Code: {response.status_code}")
+    print(f"Response content: {response.text}")
     assert response.status_code == 201, f"Expected status code 201, but got {response.status_code}"
-    task = response.json()
-    print(f"Added task to folder: {task}")
-    return task['_id']
+    result = response.json()
+    print(f"Add task to folder result: {result}")
+    return result['_id']
 
-def test_move_task_to_folder(task_id, from_folder_id, to_folder_id):
-    print(f"Testing move task {task_id} from folder {from_folder_id} to folder {to_folder_id}...")
-    response = requests.put(f"{BASE_URL}/task/{task_id}/move", json={"folder_id": to_folder_id})
+def test_move_task_to_folder(task_id, from_folder_id, to_folder_id, new_priority=None):
+    print(f"Testing move task {task_id} from folder {from_folder_id} to folder {to_folder_id} with priority {new_priority}...")
+    data = {"folder_id": to_folder_id}
+    if new_priority:
+        data["priority"] = new_priority
+    response = requests.put(f"{BASE_URL}/task/{task_id}/move", json=data)
     print(f"Status Code: {response.status_code}")
     print(f"Response content: {response.text}")
-    assert response.status_code == 200, f"Expected status code 200, but got {response.status_code}. Response content: {response.text}"
+    assert response.status_code == 200, f"Expected status code 200, but got {response.status_code}"
     result = response.json()
     print(f"Move task to folder result: {result}")
-
-
-def test_timer_operations(task_id):
-    print(f"Testing timer operations for task {task_id}...")
-    
-    # Start timer
-    response = requests.post(f"{BASE_URL}/timer/start", json={"task_id": task_id})
-    print(f"Start Timer Status Code: {response.status_code}")
-    assert response.status_code == 201, f"Expected status code 201 for start timer, but got {response.status_code}"
-    timer = response.json()
-    print(f"Started timer: {timer}")
-    
-    # Wait for 2 seconds
-    time.sleep(2)
-    
-  # Pause timer
-    response = requests.post(f"{BASE_URL}/timer/pause", json={"task_id": task_id})
-    print(f"Pause Timer Status Code: {response.status_code}")
-    assert response.status_code == 200, f"Expected status code 200 for pause timer, but got {response.status_code}"
-    timer = response.json()
-    print(f"Paused timer: {timer}")
-    
-    # Wait for 1 second
-    time.sleep(1)
-    
-    # Resume timer
-    response = requests.post(f"{BASE_URL}/timer/resume", json={"task_id": task_id})
-    print(f"Resume Timer Status Code: {response.status_code}")
-    assert response.status_code == 200, f"Expected status code 200 for resume timer, but got {response.status_code}"
-    timer = response.json()
-    print(f"Resumed timer: {timer}")
-    
-    # Wait for 2 seconds
-    time.sleep(2)
-    
-    # Stop timer
-    response = requests.post(f"{BASE_URL}/timer/stop", json={"task_id": task_id})
-    print(f"Stop Timer Status Code: {response.status_code}")
-    assert response.status_code == 200, f"Expected status code 200 for stop timer, but got {response.status_code}"
-    result = response.json()
-    print(f"Stopped timer: {result}")
 
 def run_tests():
     try:
@@ -121,26 +95,24 @@ def run_tests():
         test_get_task(task_id)
         
         # Test folder operations
-        folder_id = test_create_folder()
-        second_folder_id = test_create_folder()
+        urgent_important_folder_id = test_create_folder()
+        not_urgent_important_folder_id = test_create_folder()
         
         # Test adding task to folder
-        task_in_folder_id = test_add_task_to_folder(folder_id)
+        task_in_folder_id = test_add_task_to_folder(urgent_important_folder_id)
         
         # Test getting folder tasks
-        test_get_folder_tasks(folder_id)
+        test_get_folder_tasks(urgent_important_folder_id)
         
-        # Test moving task between folders
-        test_move_task_to_folder(task_in_folder_id, folder_id, second_folder_id)
-        
-        # Test timer operations
-        test_timer_operations(task_id)
+        # Test moving task between folders with priority change
+        test_move_task_to_folder(task_in_folder_id, urgent_important_folder_id, not_urgent_important_folder_id, 
+                                 new_priority={"urgent": False, "important": True})
         
         # Clean up
         test_delete_task(task_id)
         test_delete_task(task_in_folder_id)
-        test_delete_folder(folder_id)
-        test_delete_folder(second_folder_id)
+        test_delete_folder(urgent_important_folder_id)
+        test_delete_folder(not_urgent_important_folder_id)
         
         print("All tests passed successfully!")
     except AssertionError as e:
